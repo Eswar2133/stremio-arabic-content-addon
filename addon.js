@@ -1,26 +1,20 @@
 const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
 const axios = require('axios');
-const querystring = require('querystring'); // Needed to parse query params if you use URL-based config
-const url = require('url'); // Needed to parse the addon URL for initial config if not POSTing
+const querystring = require('querystring');
+const url = require('url'); // Added for completeness, though not explicitly used for config parsing here
 
 // --- Configuration ---
-// IMPORTANT: Set your TMDB API Key as an environment variable in Render!
-// For local testing (if you ever get an environment), you could set it directly:
-// const TMDB_API_KEY = 'YOUR_TMDB_API_KEY_HERE';
-const TMDB_API_KEY = process.env.TMDB_API_KEY; // This will be read from Render's environment variables
+const TMDB_API_KEY = process.env.TMDB_API_KEY; // Read from Render's environment variables
+const PORT = process.env.PORT || 7000;
 
-const PORT = process.env.PORT || 7000; // Render will set process.env.PORT
-
-// This will store the debrid key temporarily for this running instance of the addon.
-// It will reset if the Render Free Tier service spins down due to inactivity.
-let GLOBAL_DEBRID_API_KEY = '';
+let GLOBAL_DEBRID_API_KEY = ''; // Stores the debrid key temporarily for this running instance
 
 const builder = new addonBuilder({
   id: 'com.youraddon.arabiccontent',
   version: '1.0.0',
   name: 'Arabic Stream Hub',
   description: 'Find and stream the latest Arabic movies, series, and shows with optional debrid integration.',
-  resources: ['catalog', 'stream', 'meta', 'configure'], // Add 'configure' for user settings
+  resources: ['catalog', 'stream', 'meta', 'configure'], // 'configure' resource for user settings
   types: ['movie', 'series'],
   catalogs: [
     {
@@ -44,10 +38,8 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
   try {
     let tmdbUrl = '';
     if (type === 'movie' && id === 'arabic_movies_latest') {
-      // Discover Arabic movies, ordered by popularity. You can adjust filters.
       tmdbUrl = `https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_API_KEY}&language=ar-AE&sort_by=popularity.desc`;
     } else if (type === 'series' && id === 'arabic_series_latest') {
-      // Discover Arabic TV shows
       tmdbUrl = `https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_API_KEY}&language=ar-AE&sort_by=popularity.desc`;
     } else {
       return Promise.reject(new Error('Unsupported catalog type or ID'));
@@ -60,7 +52,7 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
     const tmdbItems = response.data.results;
 
     const metas = tmdbItems.map(item => ({
-      id: `tt${item.imdb_id || item.id}`, // Prioritize IMDb ID for broader compatibility
+      id: `tt${item.imdb_id || item.id}`,
       type: type,
       name: item.title || item.name,
       poster: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null,
@@ -80,9 +72,8 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
 // --- Stream Handler (Torrent & Debrid Integration) ---
 builder.defineStreamHandler(async ({ type, id }) => {
   const streams = [];
-  const debridApiKey = GLOBAL_DEBRID_API_KEY; // Use the key from global variable (set by configure)
+  const debridApiKey = GLOBAL_DEBRID_API_KEY;
 
-  // Extract TMDB/IMDb ID
   const contentId = id.startsWith('tt') ? id.substring(2) : id;
 
   let title = '';
@@ -94,34 +85,19 @@ builder.defineStreamHandler(async ({ type, id }) => {
       year = (tmdbDetailsResponse.data.release_date || tmdbDetailsResponse.data.first_air_date || '').substring(0, 4);
   } catch (detailError) {
       console.warn(`Could not get TMDB details for ${id}:`, detailError.message);
-      // Continue without full details, but torrent search might be less accurate
-      title = `Content ID: ${id}`; // Fallback title for torrent search
+      title = `Content ID: ${id}`;
   }
 
-  // --- CRUCIAL SECTION: TORRENT SEARCH ---
-  // This is the most complex part to implement without a local environment for testing web scrapers.
-  // For initial testing, you can manually find magnet links for some popular Arabic content
-  // (e.g., from public torrent sites or forums) and hardcode them here.
-  //
-  // For a real-world, dynamic solution:
-  // You would need to integrate with a reliable torrent API (if one exists for Arabic content)
-  // or implement web scraping. Web scraping is highly prone to breaking when websites change
-  // and is very difficult to debug without a local environment.
-  //
-  // Example of a placeholder where you'd put magnet links:
+  // --- CRUCIAL SECTION: TORRENT SEARCH (Placeholder) ---
   const potentialMagnetLinks = [];
-  // To test: find a magnet link for a known Arabic movie/series
+  // For testing, hardcode magnet links here.
   // Example: potentialMagnetLinks.push('magnet:?xt=urn:btih:A_REAL_MAGNET_HASH_FOR_ARABIC_CONTENT&dn=Movie.Title.2023.HDRip');
-  // Replace A_REAL_MAGNET_HASH_FOR_ARABIC_CONTENT with an actual magnet hash.
 
-  // --- Process Torrents (Debrid and P2P Fallback) ---
   for (const magnet of potentialMagnetLinks) {
-    // 1. Try Debrid Service first if API key is present
     if (debridApiKey) {
       try {
         const debridServiceEndpoint = 'https://api.real-debrid.com/rest/1.0';
 
-        // Add magnet to Real-Debrid
         const addMagnetResponse = await axios.post(
           `${debridServiceEndpoint}/torrents/addMagnet`,
           `magnet=${encodeURIComponent(magnet)}`,
@@ -134,8 +110,6 @@ builder.defineStreamHandler(async ({ type, id }) => {
         );
 
         const torrentId = addMagnetResponse.data.id;
-
-        // Get torrent info and files
         const torrentInfoResponse = await axios.get(
           `${debridServiceEndpoint}/torrents/info/${torrentId}`,
           {
@@ -146,7 +120,6 @@ builder.defineStreamHandler(async ({ type, id }) => {
         );
 
         const files = torrentInfoResponse.data.files;
-        // Select the largest video file
         const mainFile = files.reduce((prev, current) => {
           const videoExtensions = ['.mkv', '.mp4', '.avi', '.mov', '.webm'];
           if (videoExtensions.some(ext => current.path.toLowerCase().endsWith(ext))) {
@@ -156,10 +129,9 @@ builder.defineStreamHandler(async ({ type, id }) => {
         }, null);
 
         if (mainFile && torrentInfoResponse.data.links && torrentInfoResponse.data.links.length > 0) {
-          // Unrestrict the file (get direct link)
           const unrestrictResponse = await axios.post(
             `${debridServiceEndpoint}/unrestrict/link`,
-            `link=${encodeURIComponent(torrentInfoResponse.data.links[0])}`, // Often, the first link is the one to unrestrict
+            `link=${encodeURIComponent(torrentInfoResponse.data.links[0])}`,
             {
               headers: {
                 'Authorization': `Bearer ${debridApiKey}`,
@@ -171,41 +143,38 @@ builder.defineStreamHandler(async ({ type, id }) => {
           if (unrestrictResponse.data.stream_link) {
             streams.push({
               url: unrestrictResponse.data.stream_link,
-              title: `[RD+] ${mainFile.path.split('/').pop()}`, // Label as Real-Debrid
+              title: `[RD+] ${mainFile.path.split('/').pop()}`,
             });
           }
         } else {
              console.warn(`No streamable files found on debrid for magnet: ${magnet}`);
-             // Fallback to P2P if debrid couldn't find streamable link
              const infoHashMatch = magnet.match(/btih:([a-zA-Z0-9]{40})/);
              if (infoHashMatch && infoHashMatch[1]) {
                  streams.push({
                      infoHash: infoHashMatch[1],
                      sources: [magnet],
-                     title: `[P2P] ${title} (Torrent)`, // Label as P2P
+                     title: `[P2P] ${title} (Torrent)`,
                  });
              }
         }
       } catch (debridError) {
         console.warn(`Debrid service failed for magnet ${magnet}:`, debridError.message);
-        // If debrid fails for a magnet, we can fall back to direct P2P
         const infoHashMatch = magnet.match(/btih:([a-zA-Z0-9]{40})/);
         if (infoHashMatch && infoHashMatch[1]) {
             streams.push({
                 infoHash: infoHashMatch[1],
                 sources: [magnet],
-                title: `[P2P] ${title} (Torrent)`, // Label as P2P
+                title: `[P2P] ${title} (Torrent)`,
             });
         }
       }
     } else {
-      // No debrid key provided, or debrid failed, add direct P2P torrent stream
       const infoHashMatch = magnet.match(/btih:([a-zA-Z0-9]{40})/);
       if (infoHashMatch && infoHashMatch[1]) {
           streams.push({
-            infoHash: infoHashMatch[1], // Extract infoHash from magnet
-            sources: [magnet], // Provide the magnet link
-            title: `[P2P] ${title} (Torrent)`, // Label as P2P
+            infoHash: infoHashMatch[1],
+            sources: [magnet],
+            title: `[P2P] ${title} (Torrent)`,
           });
       } else {
           console.warn(`Invalid magnet link format: ${magnet}`);
@@ -218,14 +187,26 @@ builder.defineStreamHandler(async ({ type, id }) => {
 
 
 // --- Configure Handler (for User Debrid API Key) ---
-// This handler manages the user's Real-Debrid API key input.
-builder.defineConfigureHandler(async (args) => {
-    // If a POST request comes in (from form submission)
+// DEBUGGING LOGS START HERE (around what was line 222)
+console.log('--- DEBUGGING BUILDER OBJECT ---');
+console.log('Type of builder variable:', typeof builder);
+// Check if addonBuilder is available in this scope for instanceof check
+if (typeof addonBuilder !== 'undefined') {
+    console.log('Is builder an instance of addonBuilder?', builder instanceof addonBuilder);
+} else {
+    console.log('addonBuilder is not defined in this scope for instanceof check.');
+}
+console.log('Does builder have defineConfigureHandler property?', Object.prototype.hasOwnProperty.call(builder, 'defineConfigureHandler'));
+console.log('Value of builder.defineConfigureHandler:', builder.defineConfigureHandler);
+console.log('--- END DEBUGGING BUILDER OBJECT ---');
+
+
+builder.defineConfigureHandler(async (args) => { // This is the line that caused the error
     if (args.method === 'POST' && args.body) {
         const formData = querystring.parse(args.body.toString());
         const debridApiKey = formData.DEBRID_API_KEY;
         if (debridApiKey) {
-            GLOBAL_DEBRID_API_KEY = debridApiKey; // Store for this running instance
+            GLOBAL_DEBRID_API_KEY = debridApiKey;
             console.log("Debrid API Key received and set (hidden for security in logs).");
             return Promise.resolve({
                 html: `
@@ -261,7 +242,6 @@ builder.defineConfigureHandler(async (args) => {
         }
     }
 
-    // Default GET request for the configuration form
     const html = `
         <html>
         <head>
@@ -291,7 +271,7 @@ builder.defineConfigureHandler(async (args) => {
 });
 
 
-// Helper function to map TMDB genre IDs to names (you can extend this list)
+// Helper function to map TMDB genre IDs to names
 function getGenreName(id) {
     const genres = {
         28: 'Action', 12: 'Adventure', 16: 'Animation', 35: 'Comedy', 80: 'Crime',
@@ -306,7 +286,5 @@ function getGenreName(id) {
 serveHTTP(builder.get = getInterface(), { port: PORT });
 console.log(`Stremio Arabic Content Addon starting on port ${PORT}`);
 
-// Log the expected addon URL for easy access in Render logs
-// Note: STREMIO_ADDON_URL is usually set by Stremio SDK in certain environments
 console.log(`Addon URL: ${process.env.STREMIO_ADDON_URL || `http://localhost:${PORT}/manifest.json`}`);
 
