@@ -14,7 +14,7 @@ const builder = new addonBuilder({
   version: '1.0.0',
   name: 'Arabic Stream Hub',
   description: 'Find and stream the latest Arabic movies, series, and shows with optional debrid integration.',
-  resources: ['catalog', 'stream', 'meta', 'configure'], // 'configure' resource for user settings
+  resources: ['catalog', 'stream', 'meta'], // <-- CHANGED: Removed 'configure' from this array
   types: ['movie', 'series'],
   catalogs: [
     {
@@ -187,10 +187,9 @@ builder.defineStreamHandler(async ({ type, id }) => {
 
 
 // --- Configure Handler (for User Debrid API Key) ---
-// DEBUGGING LOGS START HERE (around what was line 222)
+// DEBUGGING LOGS START HERE
 console.log('--- DEBUGGING BUILDER OBJECT ---');
 console.log('Type of builder variable:', typeof builder);
-// Check if addonBuilder is available in this scope for instanceof check
 if (typeof addonBuilder !== 'undefined') {
     console.log('Is builder an instance of addonBuilder?', builder instanceof addonBuilder);
 } else {
@@ -201,7 +200,7 @@ console.log('Value of builder.defineConfigureHandler:', builder.defineConfigureH
 console.log('--- END DEBUGGING BUILDER OBJECT ---');
 
 
-builder.defineConfigureHandler(async (args) => { // This is the line that caused the error
+builder.defineConfigureHandler(async (args) => {
     if (args.method === 'POST' && args.body) {
         const formData = querystring.parse(args.body.toString());
         const debridApiKey = formData.DEBRID_API_KEY;
