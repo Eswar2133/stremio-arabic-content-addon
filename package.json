@@ -13,7 +13,7 @@
     "url": "^0.11.0"
   },
   "engines": {
-    "node": "18.x"
+    "node": "20.x"
   },
   "author": "Your Name",
   "license": "MIT"
